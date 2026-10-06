@@ -7,16 +7,22 @@ export interface Point {
 
 export interface PolygonAnnotation {
   id: string;
-  label: string;
+  label: string; // Object class name (e.g., 'Helmet', 'Person')
   points: Point[];
 }
 
 export function usePolygonAnnotation() {
   const [points, setPoints] = useState<Point[]>([]);
   const [polygons, setPolygons] = useState<PolygonAnnotation[]>([]);
-  const [currentLabel, setCurrentLabel] = useState<string>('Object 1');
+  const [currentLabel, setCurrentLabel] = useState<string>('Person');
+  const [classList, setClassList] = useState<string[]>([
+    'Person',
+    'Helmet',
+    'Vehicle',
+    'Background',
+  ]);
 
-  // Remove the previous active vertex point
+  // Remove the last placed vertex point
   const undoLastPoint = () => {
     setPoints((prev) => prev.slice(0, -1));
   };
@@ -25,21 +31,42 @@ export function usePolygonAnnotation() {
     setPoints((prev) => [...prev, point]);
   };
 
-  // Attempt File System Access API save, fallback to browser download trigger
+  // Function to add new custom class labels to the toolkit dropdown
+  const addClassCategory = (newClass: string) => {
+    const trimmed = newClass.trim();
+    if (trimmed && !classList.includes(trimmed)) {
+      setClassList((prev) => [...prev, trimmed]);
+      setCurrentLabel(trimmed);
+    }
+  };
+
+  // JSON export function triggered explicitly when changing images or downloading manually
   const autoSaveLocalJSON = async (
-    updatedPolygons: PolygonAnnotation[],
+    polygonsToSave: PolygonAnnotation[],
     imageName?: string
   ) => {
-    if (typeof window === 'undefined') return;
+    if (!polygonsToSave || polygonsToSave.length === 0) return;
 
     const baseName = imageName
       ? imageName.substring(0, imageName.lastIndexOf('.')) || imageName
       : `annotations_${Date.now()}`;
     const fileName = `${baseName}.json`;
-    const jsonString = JSON.stringify(updatedPolygons, null, 2);
+    
+    // Structure JSON payload to include all annotated objects for the image
+    const exportData = {
+      imageName: imageName || 'unknown',
+      totalObjects: polygonsToSave.length,
+      annotations: polygonsToSave.map((p) => ({
+        id: p.id,
+        classLabel: p.label,
+        points: p.points,
+      })),
+    };
 
-    // Modern Chrome/Edge File System Access API
-    if ('showSaveFilePicker' in window) {
+    const jsonString = JSON.stringify(exportData, null, 2);
+
+    // Browser File System Access API with fallback download
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
           suggestedName: fileName,
@@ -55,7 +82,7 @@ export function usePolygonAnnotation() {
         await writable.close();
         return;
       } catch (err: any) {
-        if (err.name === 'AbortError') return; // User cancelled prompt
+        if (err.name === 'AbortError') return;
       }
     }
 
@@ -70,18 +97,16 @@ export function usePolygonAnnotation() {
     downloadAnchor.remove();
   };
 
-  const completePolygon = (imageName?: string) => {
+  // Completes polygon for current object (no auto-download here)
+  const completePolygon = () => {
     if (points.length < 3) return;
     const newPolygon: PolygonAnnotation = {
       id: Date.now().toString(),
       label: currentLabel,
       points,
     };
-    const updatedPolygons = [...polygons, newPolygon];
-    setPolygons(updatedPolygons);
+    setPolygons((prev) => [...prev, newPolygon]);
     setPoints([]);
-
-    autoSaveLocalJSON(updatedPolygons, imageName);
   };
 
   const clearCurrent = () => setPoints([]);
@@ -93,8 +118,11 @@ export function usePolygonAnnotation() {
   return {
     points,
     polygons,
+    setPolygons,
     currentLabel,
     setCurrentLabel,
+    classList,
+    addClassCategory,
     addPoint,
     undoLastPoint,
     completePolygon,
